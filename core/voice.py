@@ -8,6 +8,10 @@ from audio_sources.youtube import YTDLSource
 from .song import SongQueue
 
 
+SONG_QUEUE_TIMEOUT = 600  # 5 min
+# SONG_QUEUE_TIMEOUT = 30  # 30 sec
+
+
 class Voice:
     """
     Represents Discord VoiceState object and allows
@@ -26,7 +30,7 @@ class Voice:
         self._volume = 0.5
 
         # create EventLoop with player task
-        self.audio_player = bot.loop.create_task(self.audio_player_task())
+        self.start_player()
 
     def __del__(self):
         self.audio_player.cancel()
@@ -54,38 +58,50 @@ class Voice:
     async def audio_player_task(self):
         while True:
             self.next.clear()
-            self.now = None
 
             if self.loop:
-                self.now = FFmpegPCMAudio(
-                    self.current.source.stream_url,
-                    **YTDLSource.FFMPEG_OPTIONS,
+                # YTDLSource(PCMVolumeTransformer(AudioSource)) can't be
+                # rewinded, the only way is to recreate it with the same
+                # source
+                await self.current.source.channel.send('**Loop** is active, playing same song')
+                self.current.source = YTDLSource(
+                    self._ctx,
+                    FFmpegPCMAudio(
+                        self.current.source.stream_url,
+                        **YTDLSource.FFMPEG_OPTIONS,
+                    ),
+                    data=self.current.source.data,
+                    volume=self.volume,
                 )
-                self.voice.play(self.now, after=self.play_next_song)
             else:
                 # Try to get the next song from SongQueue within
                 # given timeout. If no song will be added to the
                 # queue in time, the player will disconnect due
                 # to performance reasons.
                 try:
-                    async with timeout(180):  # 3 minutes
+                    async with timeout(SONG_QUEUE_TIMEOUT):
                         self.current = await self.songs.get()
                 except asyncio.TimeoutError:
-                    self.bot.loop.create_task(self.stop())
+                    await self.current.source.channel.send(
+                        f'No new songs in queue for {SONG_QUEUE_TIMEOUT} seconds. Bot now disconnects.'
+                    )
+                    self.bot.loop.create_task(self.suspend())
                     self.exists = False
                     return
 
-                self.current.source.volume = self._volume
-                self.voice.play(self.current.source, after=self.play_next_song)
+            self.voice.play(self.current.source, after=self.play_next_song)
 
-                # feedback to Discord
-                await self.current.source.channel.send(
-                    embed=self.current.create_embed()
-                    .add_field(name='Loop', value=self.loop)
-                    .add_field(name='Volume', value=int(self.volume * 100))
-                )
+            # feedback to Discord
+            await self.current.source.channel.send(
+                embed=self.current.create_embed()
+                .add_field(name='Loop', value=self.loop)
+                .add_field(name='Volume', value=int(self.volume * 100))
+            )
 
             await self.next.wait()
+
+    def start_player(self):
+        self.audio_player = self.bot.loop.create_task(self.audio_player_task())
 
     def play_next_song(self, error=None):
         if error:
@@ -95,9 +111,11 @@ class Voice:
 
     def skip(self):
         if self.is_playing:
+            self.loop = False
             self.voice.stop()
 
-    async def stop(self):
+    async def suspend(self):
+        self.current = None
         self.songs.clear()
 
         if self.voice:

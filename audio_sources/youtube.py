@@ -60,9 +60,13 @@ class YTDLSource(discord.PCMVolumeTransformer):
 
     @classmethod
     async def create_source(cls, ctx: commands.Context, search: str,
-                            *, loop: asyncio.BaseEventLoop = None):
+                            *, loop: asyncio.BaseEventLoop = None,
+                            download: bool = False, volume: float = 0.5):
         loop = loop or asyncio.get_event_loop()
 
+        # create a callable `partial()` which acts like `ytdl.extract_info()`
+        # but requires less arguments as `serach`, `download` and `process`
+        # are pre-defined
         partial = functools.partial(
             cls.ytdl.extract_info,
             search,
@@ -107,10 +111,20 @@ class YTDLSource(discord.PCMVolumeTransformer):
                 except IndexError:
                     raise YTDLError(f'Couldn\'t retrieve any matches for `{webpage_url}`')
 
+        url = info['url']
+#       if download:
+#           print(f'\n\nURL IS {url}')
+#           cls.ytdl.download([url])
+#           return cls(
+#               ctx,
+#               discord.FFmpegPCMAudio('audio.mp3'),
+#               data=info,
+#           )
         return cls(
             ctx,
-            discord.FFmpegPCMAudio(info['url'], **cls.FFMPEG_OPTIONS),
+            discord.FFmpegPCMAudio(url, **cls.FFMPEG_OPTIONS),
             data=info,
+            volume=volume,
         )
 
     @staticmethod

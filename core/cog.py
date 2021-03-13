@@ -1,11 +1,12 @@
 import math
+from copy import copy
 
 import discord
 from discord.ext import commands
 
 from audio_sources.youtube import YTDLError, YTDLSource
 from .song import Song
-from .voice import Voice
+from .voice import Voice, VoiceError
 
 
 class AudioStreamerCog(commands.Cog):
@@ -23,7 +24,7 @@ class AudioStreamerCog(commands.Cog):
 
     def cog_unload(self):
         for state in self.voice_states.values():
-            self.bot.loop.create_task(state.stop())
+            self.bot.loop.create_task(state.suspend())
 
     def cog_check(self, ctx: commands.Context):
         if not ctx.guild:
@@ -40,22 +41,10 @@ class AudioStreamerCog(commands.Cog):
 
     @commands.command(name='join', invoke_without_subcommand=True)
     @commands.has_permissions(manage_guild=True)
-    async def _join(self, ctx: commands.Context):
-        """Joins a voice channel."""
-
-        destination = ctx.author.voice.channel
-        if ctx.voice_state.voice:
-            await ctx.voice_state.voice.move_to(destination)
-            return
-
-        ctx.voice_state.voice = await destination.connect()
-
-    @commands.command(name='summon')
-    @commands.has_permissions(manage_guild=True)
-    async def _summon(self, ctx: commands.Context,
-                      *, channel: discord.VoiceChannel = None):
+    async def _join(self, ctx: commands.Context,
+                    *, channel: discord.VoiceChannel = None):
         """
-        Summons the bot to a voice channel.
+        Joins a voice channel.
         If no channel was specified, it joins your channel.
         """
 
@@ -77,7 +66,7 @@ class AudioStreamerCog(commands.Cog):
         if not ctx.voice_state.voice:
             return await ctx.send('Not connected to any voice channel.')
 
-        await ctx.voice_state.stop()
+        await ctx.voice_state.suspend()
         del self.voice_states[ctx.guild.id]
 
     @commands.command(name='now', aliases=['current', 'playing'])
@@ -133,14 +122,8 @@ class AudioStreamerCog(commands.Cog):
         if not ctx.voice_state.is_playing:
             return await ctx.send('Not playing any music right now...')
 
-        if prev_loop_state := ctx.voice_state.loop:
-            ctx.voice_state.loop = False
-
         await ctx.message.add_reaction('⏭')
         ctx.voice_state.skip()
-
-        if prev_loop_state:
-            ctx.voice_state.loop = True
 
     @commands.command(name='queue')
     @commands.has_permissions(manage_guild=True)
@@ -210,11 +193,29 @@ class AudioStreamerCog(commands.Cog):
             .add_field(name='Volume', value=int(ctx.voice_state.volume * 100))
         )
 
+    @commands.command(name='add')
+    @commands.has_permissions(manage_guild=True)
+    async def _add(self, ctx: commands.Context, *, search: str = ''):
+        """
+        Adds a song to playlist.
+        This command automatically searches from various sites if no URL is provided.
+        A list of these sites can be found here: https://rg3.github.io/youtube-dl/supportedsites.html
+        """
+        async with ctx.typing():
+            if not ctx.voice_state.voice:
+                await ctx.send('`DEBUG: joining voice channel...`')
+                await ctx.invoke(self._join)
+
+            song = await self.song_from_yotube(ctx, search)
+
+            await ctx.voice_state.songs.put(song)
+            await ctx.send(f'Enqueued {str(song.source)}')
+
     @commands.command(name='play')
     @commands.has_permissions(manage_guild=True)
-    async def _play(self, ctx: commands.Context, *, search: str):
+    async def _play(self, ctx: commands.Context, *, search: str = ''):
         """
-        Plays a song.
+        Streams a song.
         If there are songs in the queue, this will be queued until the
         other songs finished playing.
         This command automatically searches from various sites if no URL is provided.
@@ -223,18 +224,35 @@ class AudioStreamerCog(commands.Cog):
 
         async with ctx.typing():
             if not ctx.voice_state.voice:
-                await ctx.send('Joining voice channel...')
+                await ctx.send('`DEBUG: joining voice channel...`')
                 await ctx.invoke(self._join)
 
-            try:
-                source = await YTDLSource.create_source(ctx, search, loop=self.bot.loop)
-            except YTDLError as e:
-                await ctx.send(f'An error occurred while processing this request: {str(e)}')
-            else:
-                song = Song(source)
+            song = await self.song_from_yotube(ctx, search)
 
+            if ctx.voice_state.is_playing:
+                await ctx.send('`DEBUG: alredy playing smth, replacing song...`')
+
+                previously_added_songs = [
+                    copy(song_in_queue) for song_in_queue in ctx.voice_state.songs
+                ]
+                ctx.voice_state.songs.clear()
+                ctx.voice_state.songs.put_nowait(song)
+                for previously_added_song in previously_added_songs:
+                    ctx.voice_state.songs.put_nowait(previously_added_song)
+                del previously_added_songs
+
+                await ctx.invoke(self._skip)
+            else:
+                await ctx.send('`DEBUG: nothing is playing, async put to SongQueue...`')
                 await ctx.voice_state.songs.put(song)
-                await ctx.send(f'Enqueued {str(source)}')
+
+            # if bot was disconnected after timeout, Voice (aka voice_state)
+            # object exists, but `audio_player` task is already done and
+            # needs to be recreated
+            if ctx.voice_state.audio_player.done():
+                await ctx.send('`DEBUG: audio player task was done, recreating...`')
+                ctx.voice_state.start_player()
+
 
     @commands.command(name='volume')
     @commands.has_permissions(manage_guild=True)
@@ -245,9 +263,9 @@ class AudioStreamerCog(commands.Cog):
             return await ctx.send('Nothing being played at the moment.')
 
         if volume == -1:
-            return await ctx.send(f'Current volume: {int(ctx.voice_state.volume * 100)}%')
+            return await ctx.send(f'Current Volume: {ctx.voice_state.volume * 100}% ({ctx.voice_state.volume})')
 
-        if 0 > volume > 100:
+        if volume > 100 or volume < 0:
             return await ctx.send('Volume must be between 0 and 100')
 
         ctx.voice_state.volume = volume / 100
@@ -261,7 +279,8 @@ class AudioStreamerCog(commands.Cog):
             discord.Embed(title='Usage',
                           description=f'**All commands must be used with bot prefix `{ctx.prefix}`!**',
                           color=discord.Color.from_rgb(142, 192, 124))
-            .add_field(name='play `URL`', value='play `URL`, or add `URL` to queue')
+            .add_field(name='add `URL/search`', value='add `URL` or first suitable `search` to *queue*')
+            .add_field(name='play `URL/search`', value='play `URL` or first suitable `search`')
             .add_field(name='pause/resume/stop', value='control playback')
             .add_field(name='skip', value='go to next song in *queue*')
             .add_field(name='loop', value='repeat current song')
@@ -269,8 +288,7 @@ class AudioStreamerCog(commands.Cog):
             .add_field(name='queue', value='show current song *queue*')
             .add_field(name='shuffle', value='shuffle *queue*')
             .add_field(name='remove `NUM`', value='remove `NUM`th song from queue')
-            .add_field(name='join', value='add bot to your **current** voice channel')
-            .add_field(name='summon `NAME`', value='add bot to your **current** voice channel or to channel `NAME` if provided')
+            .add_field(name='join `NAME`', value='add bot to your **current** voice channel or to channel `NAME` if provided')
             .add_field(name='leave', value='remove bot from current voice channel')
             .add_field(name='volume `1-100`', value='show current volume or change volume to `1-100`'))
 
@@ -281,3 +299,17 @@ class AudioStreamerCog(commands.Cog):
     async def ensure_voice_state(self, ctx: commands.Context):
         if not ctx.author.voice or not ctx.author.voice.channel:
             raise commands.CommandError('You are not connected to any voice channel.')
+
+    async def song_from_yotube(self, ctx: commands.Context, search: str):
+        if not search:
+            raise VoiceError('**Please provide URL or search keywords**')
+
+        try:
+            source = await YTDLSource.create_source(
+                ctx, search,
+                loop=self.bot.loop,
+            )
+        except YTDLError as e:
+            await ctx.send(f'An error occurred while processing this request: {str(e)}')
+        else:
+            return Song(source=source)
