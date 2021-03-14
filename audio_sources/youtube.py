@@ -16,7 +16,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
         'format': 'bestaudio/best',
         'extractaudio': True,
         'audioformat': 'mp3',
-        'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
+        'outtmpl': 'audio.mp3',
         'restrictfilenames': True,
         'noplaylist': True,
         'nocheckcertificate': True,
@@ -112,20 +112,29 @@ class YTDLSource(discord.PCMVolumeTransformer):
                     raise YTDLError(f'Couldn\'t retrieve any matches for `{webpage_url}`')
 
         url = info['url']
-#       if download:
-#           print(f'\n\nURL IS {url}')
-#           cls.ytdl.download([url])
-#           return cls(
-#               ctx,
-#               discord.FFmpegPCMAudio('audio.mp3'),
-#               data=info,
-#           )
         return cls(
             ctx,
             discord.FFmpegPCMAudio(url, **cls.FFMPEG_OPTIONS),
             data=info,
             volume=volume,
         )
+
+    @classmethod
+    async def download(cls, url: str,
+                       *, loop: asyncio.BaseEventLoop = None):
+
+        loop = loop or asyncio.get_event_loop()
+
+        partial = functools.partial(
+            cls.ytdl.download,
+            [url],
+        )
+        res = await loop.run_in_executor(None, partial)
+
+        if res is None:
+            raise YTDLError(f'Failed to download `{url}`')
+
+        return res
 
     @staticmethod
     def _parse_duration(duration: int):

@@ -186,12 +186,29 @@ class AudioStreamerCog(commands.Cog):
             return await ctx.send('Nothing being played at the moment.')
 
         ctx.voice_state.loop = not ctx.voice_state.loop
+        await ctx.send(f'`DEBUG: LOOP is {ctx.voice_state.loop}`')
+#       await ctx.send(
+#           embed=ctx.voice_state.current.create_embed()
+#           .add_field(name='Loop', value=ctx.voice_state.loop)
+#           .add_field(name='Volume', value=int(ctx.voice_state.volume * 100))
+#       )
+
+        if ctx.voice_state.loop and ctx.voice_state.current.state == 'stream':
+            url = ctx.voice_state.current.source.stream_url
+
+            await ctx.send(f'`DEBUG: started downloading {ctx.voice_state.current.source}`')
+            await ctx.message.add_reaction('📥')
+
+            ctx.voice_state.current.state = 'downloading'
+
+            await YTDLSource.download(
+                loop=self.bot.loop,
+                url=url,
+            )
+            await ctx.send(f'`DEBUG: downloaded {ctx.voice_state.current.source}`')
+            ctx.voice_state.current.state = 'downloaded'
+
         await ctx.message.add_reaction('✅')
-        await ctx.send(
-            embed=ctx.voice_state.current.create_embed()
-            .add_field(name='Loop', value=ctx.voice_state.loop)
-            .add_field(name='Volume', value=int(ctx.voice_state.volume * 100))
-        )
 
     @commands.command(name='add')
     @commands.has_permissions(manage_guild=True)
@@ -252,7 +269,6 @@ class AudioStreamerCog(commands.Cog):
             if ctx.voice_state.audio_player.done():
                 await ctx.send('`DEBUG: audio player task was done, recreating...`')
                 ctx.voice_state.start_player()
-
 
     @commands.command(name='volume')
     @commands.has_permissions(manage_guild=True)

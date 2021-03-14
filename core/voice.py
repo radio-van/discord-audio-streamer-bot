@@ -1,4 +1,5 @@
 import asyncio
+import os
 from async_timeout import timeout
 
 from discord import FFmpegPCMAudio
@@ -43,6 +44,12 @@ class Voice:
     def loop(self, value: bool):
         self._loop = value
 
+        if not self.loop:
+            # throw away downloaded file when loop is off
+            # or song was skipped
+            if os.path.isfile('audio.mp3'):
+                os.remove('audio.mp3')
+
     @property
     def volume(self):
         return self._volume
@@ -63,16 +70,41 @@ class Voice:
                 # YTDLSource(PCMVolumeTransformer(AudioSource)) can't be
                 # rewinded, the only way is to recreate it with the same
                 # source
-                await self.current.source.channel.send('**Loop** is active, playing same song')
-                self.current.source = YTDLSource(
-                    self._ctx,
-                    FFmpegPCMAudio(
+                if self.current.state == 'downloaded':
+                    await self.current.source.channel.send(
+                        f'`DEBUG: recreating source from local file for {self.current.source}`'
+                    )
+                    recreated_source = FFmpegPCMAudio('audio.mp3')
+                else:
+                    await self.current.source.channel.send(
+                        f'`DEBUG: recreating source from streaming url for {self.current.source}`'
+                    )
+                    recreated_source = FFmpegPCMAudio(
                         self.current.source.stream_url,
                         **YTDLSource.FFMPEG_OPTIONS,
-                    ),
-                    data=self.current.source.data,
-                    volume=self.volume,
-                )
+                    )
+                # if FFmpegPCMAudio fails to read source (e.g. file is missing or
+                # failed to connect to server), .read() returns b''
+                if not recreated_source.read():
+                    if self.current.state == 'downloaded':
+                        await self.current.source.channel.send(
+                            f'`DEBUG: Failed to read local file for {self.current.source}`'
+                        )
+                    else:
+                        await self.current.source.channel.send(
+                            f'`DEBUG: Failed to recreate stream for {self.current.source}`'
+                        )
+                    self.loop = False
+                    self.voice.stop()
+                    self.next.set()
+                else:
+                    self.current.source = YTDLSource(
+                        self._ctx,
+                        recreated_source,
+                        data=self.current.source.data,
+                        volume=self.volume,
+                    )
+                    self.voice.play(self.current.source, after=self.play_next_song)
             else:
                 # Try to get the next song from SongQueue within
                 # given timeout. If no song will be added to the
@@ -89,14 +121,14 @@ class Voice:
                     self.exists = False
                     return
 
-            self.voice.play(self.current.source, after=self.play_next_song)
+                # feedback to Discord (feedback on loop can produce spam)
+                await self.current.source.channel.send(
+                    embed=self.current.create_embed()
+                    .add_field(name='Loop', value=self.loop)
+                    .add_field(name='Volume', value=int(self.volume * 100))
+                )
 
-            # feedback to Discord
-            await self.current.source.channel.send(
-                embed=self.current.create_embed()
-                .add_field(name='Loop', value=self.loop)
-                .add_field(name='Volume', value=int(self.volume * 100))
-            )
+                self.voice.play(self.current.source, after=self.play_next_song)
 
             await self.next.wait()
 
@@ -116,6 +148,7 @@ class Voice:
 
     async def suspend(self):
         self.current = None
+        self.loop = False
         self.songs.clear()
 
         if self.voice:

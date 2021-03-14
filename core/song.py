@@ -13,10 +13,11 @@ class Song:
     (in this case YouTube) audio sources.
     """
     # reduce memory usage
-    __slots__ = ('source')
+    __slots__ = ('source', 'state')
 
     def __init__(self, source: YTDLSource):
         self.source = source
+        self.state = 'stream'
 
     def create_embed(self):
         """
@@ -27,7 +28,7 @@ class Song:
                         description=f'```css\n{self.source.title}\n```',
                         color=discord.Color.from_rgb(27, 52, 53))
                  .add_field(name='Duration', value=self.source.duration)
-                 .add_field(name='URL', value=f'[Click]({self.source.url})')
+                 .add_field(name='Source', value=f'[Click]({self.source.url})' if self.state == 'stream' else self.state)
                  .set_thumbnail(url=self.source.thumbnail))
 
         return embed
