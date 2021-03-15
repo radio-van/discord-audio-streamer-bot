@@ -47,8 +47,8 @@ class Voice:
         if not self.loop:
             # throw away downloaded file when loop is off
             # or song was skipped
-            if os.path.isfile('audio.mp3'):
-                os.remove('audio.mp3')
+            if os.path.isfile(f'{self.bot.command_prefix}.mp3'.replace('..', '.')):
+                os.remove(f'{self.bot.command_prefix}.mp3'.replace('..', '.'))
 
     @property
     def volume(self):
@@ -74,7 +74,7 @@ class Voice:
                     await self.current.source.channel.send(
                         f'`DEBUG: recreating source from local file for {self.current.source}`'
                     )
-                    recreated_source = FFmpegPCMAudio('audio.mp3')
+                    recreated_source = FFmpegPCMAudio(f'{self.bot.command_prefix}.mp3'.replace('..', '.'))
                 else:
                     await self.current.source.channel.send(
                         f'`DEBUG: recreating source from streaming url for {self.current.source}`'

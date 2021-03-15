@@ -28,7 +28,8 @@ class Song:
                         description=f'```css\n{self.source.title}\n```',
                         color=discord.Color.from_rgb(27, 52, 53))
                  .add_field(name='Duration', value=self.source.duration)
-                 .add_field(name='Source', value=f'[Click]({self.source.url})' if self.state == 'stream' else self.state)
+                 .add_field(name='Source',
+                            value=f'[Click]({self.source.url})' if self.state == 'stream' else self.state)
                  .set_thumbnail(url=self.source.thumbnail))
 
         return embed

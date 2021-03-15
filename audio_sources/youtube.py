@@ -111,19 +111,20 @@ class YTDLSource(discord.PCMVolumeTransformer):
                 except IndexError:
                     raise YTDLError(f'Couldn\'t retrieve any matches for `{webpage_url}`')
 
-        url = info['url']
         return cls(
             ctx,
-            discord.FFmpegPCMAudio(url, **cls.FFMPEG_OPTIONS),
+            discord.FFmpegPCMAudio(info['url'], **cls.FFMPEG_OPTIONS),
             data=info,
             volume=volume,
         )
 
     @classmethod
-    async def download(cls, url: str,
-                       *, loop: asyncio.BaseEventLoop = None):
+    async def download(cls, filename: str, url: str,
+                       loop: asyncio.BaseEventLoop = None):
 
         loop = loop or asyncio.get_event_loop()
+
+        cls.ytdl.params['outtmpl'] = filename
 
         partial = functools.partial(
             cls.ytdl.download,

@@ -202,6 +202,7 @@ class AudioStreamerCog(commands.Cog):
             ctx.voice_state.current.state = 'downloading'
 
             await YTDLSource.download(
+                filename=f'{self.bot.command_prefix}.mp3'.replace('..', '.'),
                 loop=self.bot.loop,
                 url=url,
             )
@@ -247,7 +248,7 @@ class AudioStreamerCog(commands.Cog):
             song = await self.song_from_yotube(ctx, search)
 
             if ctx.voice_state.is_playing:
-                await ctx.send('`DEBUG: alredy playing smth, replacing song...`')
+                await ctx.send('`DEBUG: already playing smth, replacing song...`')
 
                 previously_added_songs = [
                     copy(song_in_queue) for song_in_queue in ctx.voice_state.songs
@@ -299,12 +300,13 @@ class AudioStreamerCog(commands.Cog):
             .add_field(name='play `URL/search`', value='play `URL` or first suitable `search`')
             .add_field(name='pause/resume/stop', value='control playback')
             .add_field(name='skip', value='go to next song in *queue*')
-            .add_field(name='loop', value='repeat current song')
+            .add_field(name='loop', value='repeat current song, file is downloaded')
             .add_field(name='now', value='show current song')
             .add_field(name='queue', value='show current song *queue*')
             .add_field(name='shuffle', value='shuffle *queue*')
             .add_field(name='remove `NUM`', value='remove `NUM`th song from queue')
-            .add_field(name='join `NAME`', value='add bot to your **current** voice channel or to channel `NAME` if provided')
+            .add_field(name='join `NAME`',
+                       value='add bot to your **current** voice channel or to channel `NAME` if provided')
             .add_field(name='leave', value='remove bot from current voice channel')
             .add_field(name='volume `1-100`', value='show current volume or change volume to `1-100`'))
 
