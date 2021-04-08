@@ -71,14 +71,8 @@ class Voice:
                 # rewinded, the only way is to recreate it with the same
                 # source
                 if self.current.state == 'downloaded':
-                    await self.current.source.channel.send(
-                        f'`DEBUG: recreating source from local file for {self.current.source}`'
-                    )
                     recreated_source = FFmpegPCMAudio(f'{self.bot.command_prefix}.mp3'.replace('..', '.'))
                 else:
-                    await self.current.source.channel.send(
-                        f'`DEBUG: recreating source from streaming url for {self.current.source}`'
-                    )
                     recreated_source = FFmpegPCMAudio(
                         self.current.source.stream_url,
                         **YTDLSource.FFMPEG_OPTIONS,
@@ -86,14 +80,6 @@ class Voice:
                 # if FFmpegPCMAudio fails to read source (e.g. file is missing or
                 # failed to connect to server), .read() returns b''
                 if not recreated_source.read():
-                    if self.current.state == 'downloaded':
-                        await self.current.source.channel.send(
-                            f'`DEBUG: Failed to read local file for {self.current.source}`'
-                        )
-                    else:
-                        await self.current.source.channel.send(
-                            f'`DEBUG: Failed to recreate stream for {self.current.source}`'
-                        )
                     self.loop = False
                     self.voice.stop()
                     self.next.set()

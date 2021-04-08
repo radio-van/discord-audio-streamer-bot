@@ -186,17 +186,10 @@ class AudioStreamerCog(commands.Cog):
             return await ctx.send('Nothing being played at the moment.')
 
         ctx.voice_state.loop = not ctx.voice_state.loop
-        await ctx.send(f'`DEBUG: LOOP is {ctx.voice_state.loop}`')
-#       await ctx.send(
-#           embed=ctx.voice_state.current.create_embed()
-#           .add_field(name='Loop', value=ctx.voice_state.loop)
-#           .add_field(name='Volume', value=int(ctx.voice_state.volume * 100))
-#       )
 
         if ctx.voice_state.loop and ctx.voice_state.current.state == 'stream':
             url = ctx.voice_state.current.source.stream_url
 
-            await ctx.send(f'`DEBUG: started downloading {ctx.voice_state.current.source}`')
             await ctx.message.add_reaction('📥')
 
             ctx.voice_state.current.state = 'downloading'
@@ -206,7 +199,6 @@ class AudioStreamerCog(commands.Cog):
                 loop=self.bot.loop,
                 url=url,
             )
-            await ctx.send(f'`DEBUG: downloaded {ctx.voice_state.current.source}`')
             ctx.voice_state.current.state = 'downloaded'
 
         await ctx.message.add_reaction('✅')
@@ -221,7 +213,6 @@ class AudioStreamerCog(commands.Cog):
         """
         async with ctx.typing():
             if not ctx.voice_state.voice:
-                await ctx.send('`DEBUG: joining voice channel...`')
                 await ctx.invoke(self._join)
 
             song = await self.song_from_yotube(ctx, search)
@@ -242,13 +233,11 @@ class AudioStreamerCog(commands.Cog):
 
         async with ctx.typing():
             if not ctx.voice_state.voice:
-                await ctx.send('`DEBUG: joining voice channel...`')
                 await ctx.invoke(self._join)
 
             song = await self.song_from_yotube(ctx, search)
 
             if ctx.voice_state.is_playing:
-                await ctx.send('`DEBUG: already playing smth, replacing song...`')
 
                 previously_added_songs = [
                     copy(song_in_queue) for song_in_queue in ctx.voice_state.songs
@@ -261,14 +250,12 @@ class AudioStreamerCog(commands.Cog):
 
                 await ctx.invoke(self._skip)
             else:
-                await ctx.send('`DEBUG: nothing is playing, async put to SongQueue...`')
                 await ctx.voice_state.songs.put(song)
 
             # if bot was disconnected after timeout, Voice (aka voice_state)
             # object exists, but `audio_player` task is already done and
             # needs to be recreated
             if ctx.voice_state.audio_player.done():
-                await ctx.send('`DEBUG: audio player task was done, recreating...`')
                 ctx.voice_state.start_player()
 
     @commands.command(name='volume')
